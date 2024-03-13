@@ -4,8 +4,8 @@
 trigger:
 - master
 - releases/*
-variables:
-- group: npm-tokens
+#variables:
+#- group: npm-tokens
 resources:
   repositories:
   - repository: 1ESPipelineTemplates
@@ -23,9 +23,14 @@ extends:
     #   baseline:
     #     baselineSet: default
     #     baselineFile: $(Build.SourcesDirectory)/.gdn/.gdnbaselines
+    sdl:
+      sourceAnalysisPool:
+        name: Azure-Pipelines-1ESPT-ExDShared
+        image: windows-2022
+        os: windows
     pool:
-      name: 1ES-ABTT-Shared-Pool
-      image: abtt-windows-2022
+      name: Azure-Pipelines-1ESPT-ExDShared
+      image: windows-2022
       os: windows
     stages:
     - stage: stage
@@ -44,42 +49,40 @@ extends:
           clean: true
 
         - task: NodeTool@0
-          displayName: Use node 10
+          displayName: Use node 20
           inputs:
-            versionSpec: "10.x"
+            versionSpec: "20.x"
 
-        - script: npm i -g npm@6.14.12 --force
-          displayName: Use npm version 6.14.12
+        - script: npm i -g npm@10.2.4 --force
+          displayName: Use npm version 10.2.4
 
+        - script: npm i -g typescript@5.1.3 --force
+          displayName: Use typescript (tsc) version 5.1.3
+        
+        - task: Npm@1
+          displayName: install TFX CLI dependencies
+          inputs:
+            command: ci
+        
         - bash: |
-            npm ci
             npm run build
           displayName: Build TFX CLI
 
-        - ${{ if in(variables['build.reason'], 'IndividualCI', 'BatchedCI', 'Manual') }}:
-          # For CI and Manual runs automatically publish packages
-          # The npm cli will replace ${NPM_TOKEN} with the contents of the NPM_TOKEN environment variable.
-          - bash: |
-              echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > .npmrc
-
-              npm publish --ignore-scripts
-              exit_status=$?
-              if [ $exit_status -eq 1 ]; then
-                  echo "##vso[task.logissue type=warning]Publishing TFX CLI was unsuccessful"
-                  echo "##vso[task.complete result=SucceededWithIssues;]"
-              fi
-
-              rm .npmrc
-            displayName: Publish TFX CLI to npm
-            env:
-              NPM_TOKEN: $(npm-automation.token)
-
-          # Generate a pipeline artifact so we can publish the package manually if there are issues with automation
-          - bash: |
-              npm pack
-              cp *.tgz '$(Build.ArtifactStagingDirectory)'
-            displayName: Run npm-pack and copy to ArtifactStagingDirectory
+        - task: Npm@1
+          displayName: Publish tfx-cli to kusto npm
+          condition: and(succeeded(), in(variables['build.reason'], 'IndividualCI', 'BatchedCI', 'Manual'), eq(variables['build.sourcebranchname'], 'master'))
+          inputs:
+            command: publish
+            workingDir: './'
+            publishRegistry: useFeed
+            publishFeed: tfs-cli
+          continueOnError: true
         
+        - bash: |
+            npm pack
+            cp *.tgz '$(Build.ArtifactStagingDirectory)'
+          displayName: Run npm-pack and copy to ArtifactStagingDirectory
+
         # Install node 16 for CodeQL 3000
         - task: NodeTool@0
           displayName: Use node 16
